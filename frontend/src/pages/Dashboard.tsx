@@ -1,111 +1,106 @@
 import React, { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { Menu, Transition } from "@headlessui/react"; // For dropdown
-import { ChevronDownIcon, LogOutIcon } from "lucide-react"; // Lucide icons
+import { useNavigate } from "react-router-dom";
+import { Menu, Transition } from "@headlessui/react";
+import { ChevronDownIcon, LogOutIcon, FileTextIcon } from "lucide-react";
 import axios from "axios";
+import YoutubeVideoCard from "../components/YoutubeVideoCard";
 
-// Define the type for the user state
 interface User {
   name: string;
   profileImage: string;
 }
 
-const Dashboard = () => {
-  const location = useLocation();
-  const [message, setMessage] = useState("");
-  const [user, setUser] = useState<User | null>(null); // Explicitly type the user state
-  const [youtubeUrl, setYoutubeUrl] = useState(""); // State for the YouTube URL input
-  const [videoDetails, setVideoDetails] = useState<{ title: string; description: string } | null>(null); // State for video details
+interface SavedVideo {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  description: string;
+}
 
-  // Fetch user info from the backend
+const Dashboard = () => {
+  const navigate = useNavigate();
+
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [savedVideos, setSavedVideos] = useState<SavedVideo[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch user and videos on mount
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchUserAndVideos = async () => {
       try {
-        const response = await axios.get("http://localhost:3000/auth/user", {
-          withCredentials: true, // Ensures cookies are sent
+        const userResponse = await axios.get("http://localhost:3000/auth/user", {
+          withCredentials: true,
         });
-        console.log("User data fetched:", response.data); // Log the response
-        setUser(response.data); // Set the user data in state
+        setUser(userResponse.data);
+
+        const videosResponse = await axios.get("http://localhost:3000/youtube/saved-videos", {
+          withCredentials: true,
+        });
+        setSavedVideos(videosResponse.data);
       } catch (error) {
-        console.error("Error fetching user data:", error); // Log any errors
+        console.error("Error fetching user or videos:", error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchUser();
+    fetchUserAndVideos();
   }, []);
 
-  // Handle flash messages
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const msg = params.get("message");
-    if (msg) {
-      setMessage(msg);
-
-      // Automatically remove the query parameter from the URL
-      const newParams = new URLSearchParams(location.search);
-      newParams.delete("message");
-      window.history.replaceState(null, "", `${location.pathname}?${newParams.toString()}`);
-
-      // Automatically hide the message after 5 seconds
-      const timer = setTimeout(() => {
-        setMessage("");
-      }, 5000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [location]);
-
-  // Handle logout
   const handleLogout = async () => {
     try {
-      const response = await axios.get("http://localhost:3000/auth/logout", {
-        withCredentials: true, // Ensures cookies are included
-      });
-      console.log(response.data.message); // Debugging
-      window.location.href = "/"; // Redirect to the home page
+      await axios.get("http://localhost:3000/auth/logout", { withCredentials: true });
+      window.location.href = "/";
     } catch (error) {
       console.error("Error logging out:", error);
     }
   };
 
-  // Fetch video details from YouTube API
-  const fetchVideoDetails = async () => {
+  const handleGenerate = async () => {
     try {
-      const videoId = youtubeUrl.split("v=")[1]?.split("&")[0]; // Extract video ID
+      setError(null); // Clear any previous errors
+      setIsGenerating(true);
+      const videoId = youtubeUrl.split("v=")[1]?.split("&")[0];
       if (!videoId) {
         alert("Invalid YouTube URL");
+        setIsGenerating(false);
         return;
       }
 
-      const response = await axios.get(
-        `http://localhost:3000/youtube/video-details?videoId=${videoId}`
+      const response = await axios.post(
+        "http://localhost:3000/youtube/generate",
+        { videoId },
+        { withCredentials: true }
       );
+      setMessage(response.data.message);
 
-      const { title, description } = response.data;
-      console.log("Video Details:", { title, description });
-
-      // Update state with fetched video details
-      setVideoDetails({ title, description });
-    } catch (error) {
-      console.error("Error fetching video details:", error);
-      alert("Failed to fetch video details. Please try again.");
+      const updatedVideos = await axios.get("http://localhost:3000/youtube/saved-videos", {
+        withCredentials: true,
+      });
+      setSavedVideos(updatedVideos.data);
+      setYoutubeUrl("");
+    } catch (error: any) {
+      if (error.response?.data?.error === "Flashcards for this video already exist.") {
+        setError(error.response.data.error);
+      } else {
+        console.error("Error generating video details:", error);
+        setError("Failed to generate video details. Please try again.");
+      }
+    } finally {
+      setIsGenerating(false);
     }
-  };
-
-  const handleGenerate = () => {
-    fetchVideoDetails();
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Fixed Top Section */}
       <div className="w-full fixed top-0 bg-white shadow-sm z-10">
-        {/* Row 1 */}
         <div className="flex justify-between items-center px-16 py-3">
-          {/* Brand Name */}
           <h1 className="text-2xl font-bold text-gray-800">Jotta</h1>
-
-          {/* User Info and Dropdown */}
           <div className="flex items-center space-x-4">
             {user ? (
               <>
@@ -146,23 +141,18 @@ const Dashboard = () => {
                 </Menu>
               </>
             ) : (
-              <p className="text-gray-800">Loading user...</p> // Better feedback
+              <p className="text-gray-800">Loading user...</p>
             )}
           </div>
         </div>
 
-        {/* Row 2 */}
         <div className="py-4 px-16 max-w-2xl w-full mx-auto">
-          {message && (
-            <div
-              className="bg-green-100 border border-green-400 text-green-700 px-4 py-2 rounded-lg mb-4 shadow-md"
-              role="alert"
-            >
-              {message}
-            </div>
-          )}
+          {error && <div className="text-red-600 text-sm mb-4">{error}</div>}
+          {message && <div className="text-green-600 text-sm mb-4">{message}</div>}
           <p className="text-gray-700 mb-4 text-center">
-            Enter a YouTube video link to get started or view your previously generated flashcards below.
+            {savedVideos.length > 0
+              ? "Enter a YouTube video link to generate more flashcards or view your previously generated videos below."
+              : "Enter a YouTube video link to get started with your first flashcards."}
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0 max-w-2xl">
             <input
@@ -175,8 +165,9 @@ const Dashboard = () => {
             <button
               onClick={handleGenerate}
               className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              disabled={isGenerating}
             >
-              Generate
+              {isGenerating ? "Generating..." : "Generate"}
             </button>
           </div>
         </div>
@@ -184,34 +175,30 @@ const Dashboard = () => {
 
       {/* Content Below Fixed Section */}
       <div className="px-6 py-64">
-        <div className="max-w-2xl w-full mx-auto">
-          {videoDetails && (
-            <div className="mb-8">
-              <h3 className="text-lg font-bold text-gray-800">{videoDetails.title}</h3>
-              <p className="text-gray-600">{videoDetails.description}</p>
-            </div>
-          )}
-          <h3 className="text-lg font-medium text-gray-700 mb-4">
-            Previously Generated Flashcards
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Example Flashcard */}
-            <div className="bg-white border border-gray-200 rounded-lg shadow-md p-4">
-              <img
-                src="https://via.placeholder.com/150"
-                alt="YouTube Thumbnail"
-                className="w-full rounded-md mb-3"
-              />
-              <h4 className="text-md font-medium text-gray-700">
-                Sample Video Title
-              </h4>
-              <button className="mt-2 text-blue-600 hover:underline">
-                View Details
-              </button>
-            </div>
-            {/* Add more flashcards here */}
+        {isLoading ? (
+          <div className="flex justify-center items-center h-32">
+            <div className="w-12 h-12 border-4 border-blue-500 border-dotted rounded-full animate-spin"></div>
           </div>
-        </div>
+        ) : savedVideos.length > 0 ? (
+          <>
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Your Flashcard Videos</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedVideos.map((video) => (
+                <YoutubeVideoCard
+                  key={video.videoId}
+                  thumbnail={video.thumbnail}
+                  title={video.title}
+                  onClick={() => navigate(`/flashcards/${video.videoId}`)}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center mt-16 text-gray-600">
+            <FileTextIcon className="w-16 h-16 mb-4" />
+            <p className="text-lg">No YouTube video flashcards yet.</p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -47,9 +47,19 @@ app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Define the ensureAuthenticated middleware
+// const ensureAuthenticated = (req, res, next) => {
+//     console.log("Authenticated User:", req.user); // Debugging log
+//     if (req.isAuthenticated()) {
+//       return next();
+//     }
+//     res.status(401).json({ error: "Unauthorized. Please log in." });
+// };  
+
 // Routes
 app.use("/auth", require("./routes/auth"));
 app.use("/youtube", youtubeRoutes);
+
 
 // Start server
 const PORT = process.env.PORT || 5000;
