@@ -3,16 +3,23 @@ const express = require("express");
 const connectDB = require("./config/db");
 const passport = require("passport");
 const session = require("express-session");
+const flash = require("connect-flash");
 const cors = require("cors");
 
 const app = express();
 
+
 // Middleware
-app.use(cors());
+app.use(
+    cors({
+      origin: "http://localhost:3001", // Your frontend URL
+      credentials: true, // Allow cookies to be sent
+    })
+  );
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Connect DB
+// Connect to MongoDB
 connectDB();
 
 // Passport Configuration
@@ -20,12 +27,22 @@ require("./config/passport")(passport);
 
 // Session Middleware
 app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-  })
-);
+    session({
+      secret: process.env.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        httpOnly: true,
+        secure: false, // Set to true in production (HTTPS)
+        sameSite: "lax",
+      },
+    })
+  );
+
+// Flash Middleware
+app.use(flash());
+
+// Passport Middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
