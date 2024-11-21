@@ -14,6 +14,8 @@ const Dashboard = () => {
   const location = useLocation();
   const [message, setMessage] = useState("");
   const [user, setUser] = useState<User | null>(null); // Explicitly type the user state
+  const [youtubeUrl, setYoutubeUrl] = useState(""); // State for the YouTube URL input
+  const [videoDetails, setVideoDetails] = useState<{ title: string; description: string } | null>(null); // State for video details
 
   // Fetch user info from the backend
   useEffect(() => {
@@ -28,7 +30,7 @@ const Dashboard = () => {
         console.error("Error fetching user data:", error); // Log any errors
       }
     };
-  
+
     fetchUser();
   }, []);
 
@@ -39,6 +41,12 @@ const Dashboard = () => {
     if (msg) {
       setMessage(msg);
 
+      // Automatically remove the query parameter from the URL
+      const newParams = new URLSearchParams(location.search);
+      newParams.delete("message");
+      window.history.replaceState(null, "", `${location.pathname}?${newParams.toString()}`);
+
+      // Automatically hide the message after 5 seconds
       const timer = setTimeout(() => {
         setMessage("");
       }, 5000);
@@ -60,6 +68,34 @@ const Dashboard = () => {
     }
   };
 
+  // Fetch video details from YouTube API
+  const fetchVideoDetails = async () => {
+    try {
+      const videoId = youtubeUrl.split("v=")[1]?.split("&")[0]; // Extract video ID
+      if (!videoId) {
+        alert("Invalid YouTube URL");
+        return;
+      }
+
+      const response = await axios.get(
+        `http://localhost:3000/youtube/video-details?videoId=${videoId}`
+      );
+
+      const { title, description } = response.data;
+      console.log("Video Details:", { title, description });
+
+      // Update state with fetched video details
+      setVideoDetails({ title, description });
+    } catch (error) {
+      console.error("Error fetching video details:", error);
+      alert("Failed to fetch video details. Please try again.");
+    }
+  };
+
+  const handleGenerate = () => {
+    fetchVideoDetails();
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Fixed Top Section */}
@@ -71,48 +107,48 @@ const Dashboard = () => {
 
           {/* User Info and Dropdown */}
           <div className="flex items-center space-x-4">
-          {user ? (
-            <>
-              <img
-                src={user.profileImage || "https://via.placeholder.com/40"}
-                alt="User"
-                className="w-10 h-10 rounded-full border border-gray-300"
-              />
-              <p className="text-gray-800">{user.name}</p>
-              <Menu as="div" className="relative">
-                <Menu.Button>
-                  <ChevronDownIcon className="w-6 h-6 text-gray-600 cursor-pointer" />
-                </Menu.Button>
-                <Transition
-                  enter="transition ease-out duration-100"
-                  enterFrom="transform opacity-0 scale-95"
-                  enterTo="transform opacity-100 scale-100"
-                  leave="transition ease-in duration-75"
-                  leaveFrom="transform opacity-100 scale-100"
-                  leaveTo="transform opacity-0 scale-95"
-                >
-                  <Menu.Items className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                    <Menu.Item>
-                      {({ active }) => (
-                        <button
-                          onClick={handleLogout}
-                          className={`${
-                            active ? "bg-gray-100" : ""
-                          } flex items-center w-full px-4 py-2 text-gray-800 text-sm`}
-                        >
-                          <LogOutIcon className="w-5 h-5 mr-2 text-gray-600" />
-                          Log Out
-                        </button>
-                      )}
-                    </Menu.Item>
-                  </Menu.Items>
-                </Transition>
-              </Menu>
-            </>
-          ) : (
-            <p className="text-gray-800">Loading user...</p> // Better feedback
-          )}
-        </div>
+            {user ? (
+              <>
+                <img
+                  src={user.profileImage || "https://via.placeholder.com/40"}
+                  alt="User"
+                  className="w-10 h-10 rounded-full border border-gray-300"
+                />
+                <p className="text-gray-800">{user.name}</p>
+                <Menu as="div" className="relative">
+                  <Menu.Button>
+                    <ChevronDownIcon className="w-6 h-6 text-gray-600 cursor-pointer" />
+                  </Menu.Button>
+                  <Transition
+                    enter="transition ease-out duration-100"
+                    enterFrom="transform opacity-0 scale-95"
+                    enterTo="transform opacity-100 scale-100"
+                    leave="transition ease-in duration-75"
+                    leaveFrom="transform opacity-100 scale-100"
+                    leaveTo="transform opacity-0 scale-95"
+                  >
+                    <Menu.Items className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                      <Menu.Item>
+                        {({ active }) => (
+                          <button
+                            onClick={handleLogout}
+                            className={`${
+                              active ? "bg-gray-100" : ""
+                            } flex items-center w-full px-4 py-2 text-gray-800 text-sm`}
+                          >
+                            <LogOutIcon className="w-5 h-5 mr-2 text-gray-600" />
+                            Log Out
+                          </button>
+                        )}
+                      </Menu.Item>
+                    </Menu.Items>
+                  </Transition>
+                </Menu>
+              </>
+            ) : (
+              <p className="text-gray-800">Loading user...</p> // Better feedback
+            )}
+          </div>
         </div>
 
         {/* Row 2 */}
@@ -126,17 +162,21 @@ const Dashboard = () => {
             </div>
           )}
           <p className="text-gray-700 mb-4 text-center">
-            Enter a YouTube video link to get started or view your previously
-            generated flashcards below.
+            Enter a YouTube video link to get started or view your previously generated flashcards below.
           </p>
           <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0 max-w-2xl">
             <input
-                type="text"
-                placeholder="Enter YouTube video URL"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              type="text"
+              placeholder="Enter YouTube video URL"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              value={youtubeUrl}
+              onChange={(e) => setYoutubeUrl(e.target.value)}
             />
-            <button className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                Generate
+            <button
+              onClick={handleGenerate}
+              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Generate
             </button>
           </div>
         </div>
@@ -145,6 +185,12 @@ const Dashboard = () => {
       {/* Content Below Fixed Section */}
       <div className="px-6 py-64">
         <div className="max-w-2xl w-full mx-auto">
+          {videoDetails && (
+            <div className="mb-8">
+              <h3 className="text-lg font-bold text-gray-800">{videoDetails.title}</h3>
+              <p className="text-gray-600">{videoDetails.description}</p>
+            </div>
+          )}
           <h3 className="text-lg font-medium text-gray-700 mb-4">
             Previously Generated Flashcards
           </h3>

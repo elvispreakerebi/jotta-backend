@@ -5,6 +5,7 @@ const passport = require("passport");
 const session = require("express-session");
 const flash = require("connect-flash");
 const cors = require("cors");
+const youtubeRoutes = require("./routes/youtube");
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use(passport.session());
 
 // Routes
 app.use("/auth", require("./routes/auth"));
+app.use("/youtube", youtubeRoutes);
 
 // Start server
 const PORT = process.env.PORT || 5000;
