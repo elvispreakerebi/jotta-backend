@@ -62,38 +62,54 @@ const Dashboard = () => {
 
   const handleGenerate = async () => {
     try {
-      setError(null); // Clear any previous errors
       setIsGenerating(true);
       const videoId = youtubeUrl.split("v=")[1]?.split("&")[0];
+  
       if (!videoId) {
         alert("Invalid YouTube URL");
         setIsGenerating(false);
         return;
       }
-
-      const response = await axios.post(
+  
+      const { data } = await axios.post(
         "http://localhost:3000/youtube/generate",
         { videoId },
         { withCredentials: true }
       );
-      setMessage(response.data.message);
-
-      const updatedVideos = await axios.get("http://localhost:3000/youtube/saved-videos", {
-        withCredentials: true,
-      });
-      setSavedVideos(updatedVideos.data);
+  
       setYoutubeUrl("");
-    } catch (error: any) {
-      if (error.response?.data?.error === "Flashcards for this video already exist.") {
-        setError(error.response.data.error);
-      } else {
-        console.error("Error generating video details:", error);
-        setError("Failed to generate video details. Please try again.");
-      }
-    } finally {
+  
+      // Polling for status updates
+      const interval = setInterval(async () => {
+        try {
+          const statusResponse = await axios.get(`http://localhost:3000/youtube/status/${videoId}`, {
+            withCredentials: true,
+          });
+          if (statusResponse.data.status === "completed") {
+            clearInterval(interval);
+            const videosResponse = await axios.get("http://localhost:3000/youtube/saved-videos", {
+              withCredentials: true,
+            });
+            setSavedVideos(videosResponse.data);
+            setIsGenerating(false);
+          } else if (statusResponse.data.status === "failed") {
+            clearInterval(interval);
+            alert("Failed to generate flashcards. Please try again.");
+            setIsGenerating(false);
+          }
+        } catch (error) {
+          console.error("Error checking status:", error);
+          clearInterval(interval);
+          setIsGenerating(false);
+        }
+      }, 5000);
+    } catch (error) {
+      console.error("Error generating video details:", error);
+      alert("Failed to generate video details. Please try again.");
       setIsGenerating(false);
     }
   };
+  
 
   return (
     <div className="min-h-screen bg-gray-50">

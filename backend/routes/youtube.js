@@ -1,8 +1,8 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const axios = require("axios");
 const youtubeDl = require("youtube-dl-exec");
-const fs = require("fs");
-const path = require("path");
 const YouTubeVideo = require("../models/YoutubeVideo");
 const ensureAuthenticated = require("../middleware/ensureAuthenticated");
 const { OpenAI } = require("openai");
@@ -10,135 +10,129 @@ const { OpenAI } = require("openai");
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Ensure the `temp` directory exists
-const tempDir = path.resolve(__dirname, "../temp");
-if (!fs.existsSync(tempDir)) {
-  try {
-    fs.mkdirSync(tempDir, { recursive: true });
-  } catch (err) {
-    console.error("Failed to create temp directory:", err);
-  }
-}
-
-// Generate Flashcards for a Video
+// Start the transcription process and save video details
 router.post("/generate", ensureAuthenticated, async (req, res) => {
   const { videoId } = req.body;
 
   if (!videoId) {
-    return res.status(400).json({ error: "Video ID is required" });
+    return res.status(400).json({ error: "Video ID is required." });
   }
 
   try {
-    // Check if the video already exists and has flashcards
+    // Check if video already exists
     const existingVideo = await YouTubeVideo.findOne({ videoId, userId: req.user._id });
-    if (existingVideo && existingVideo.flashcards && existingVideo.flashcards.length > 0) {
-      return res.status(400).json({
-        error: "Flashcards for this video already exist.",
-        video: existingVideo,
-      });
+    if (existingVideo) {
+      return res.status(400).json({ error: "Flashcards for this video already exist." });
     }
 
-    // Step 1: Fetch video metadata using YouTube API or youtube-dl
-    const videoInfo = await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
+    // Fetch video details
+    const videoDetails = await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
       dumpSingleJson: true,
+      noCheckCertificates: true,
     });
 
-    const { title, description, thumbnail } = videoInfo;
-    console.log("Video Metadata:", { title, description, thumbnail });
+    const newVideo = new YouTubeVideo({
+      videoId,
+      title: videoDetails.title,
+      description: videoDetails.description,
+      thumbnail: videoDetails.thumbnail,
+      userId: req.user._id,
+    });
 
-    // Save or update video details in the database
-    let video = existingVideo;
+    await newVideo.save();
+
+    // Start transcription and summarization in the background
+    transcribeAndGenerateFlashcards(newVideo._id);
+
+    res.status(200).json({ message: "Processing started.", video: newVideo });
+  } catch (error) {
+    console.error("Error starting processing:", error);
+    res.status(500).json({ error: "Failed to start processing." });
+  }
+});
+
+// Check video status
+router.get("/status/:videoId", ensureAuthenticated, async (req, res) => {
+  const { videoId } = req.params;
+
+  try {
+    const video = await YouTubeVideo.findOne({ videoId, userId: req.user._id });
     if (!video) {
-      video = new YouTubeVideo({
-        videoId,
-        title,
-        description,
-        thumbnail: thumbnail || "", // Use default thumbnail if missing
-        userId: req.user._id,
-        flashcards: [],
-      });
+      return res.status(404).json({ error: "Video not found." });
     }
 
-    // Step 2: Extract audio URL from YouTube
-    const audioUrl = await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
+    res.json({ status: video.status, error: video.error, flashcards: video.flashcards });
+  } catch (error) {
+    console.error("Error fetching status:", error);
+    res.status(500).json({ error: "Failed to fetch video status." });
+  }
+});
+
+// Background processing function
+const transcribeAndGenerateFlashcards = async (videoId) => {
+  try {
+    const video = await YouTubeVideo.findById(videoId);
+    if (!video) return;
+
+    video.status = "transcribing";
+    await video.save();
+
+    const audioUrl = await youtubeDl(`https://www.youtube.com/watch?v=${video.videoId}`, {
       extractAudio: true,
       audioFormat: "mp3",
       getUrl: true,
     });
-    console.log("Audio URL:", audioUrl);
 
-    // Step 3: Download audio file locally
-    const audioPath = path.resolve(tempDir, `${videoId}.mp3`);
+    const audioPath = path.resolve(__dirname, `../temp/${video.videoId}.mp3`);
     const writer = fs.createWriteStream(audioPath);
-    const response = await axios({
-      url: audioUrl,
-      method: "GET",
-      responseType: "stream",
-    });
-
+    const response = await axios({ url: audioUrl, method: "GET", responseType: "stream" });
     response.data.pipe(writer);
     await new Promise((resolve, reject) => {
       writer.on("finish", resolve);
       writer.on("error", reject);
     });
 
-    // Step 4: Transcribe the audio file using OpenAI Whisper
     const transcriptionResponse = await openai.audio.transcriptions.create({
       file: fs.createReadStream(audioPath),
       model: "whisper-1",
     });
 
     const transcription = transcriptionResponse.text;
-    console.log("Transcription:", transcription);
 
-    // Step 5: Generate flashcards using GPT-4
     const summaryResponse = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
-        {
-          role: "system",
-          content:
-            "You are a flashcard generator. Summarize the provided text into concise points suitable for flashcards.",
-        },
+        { role: "system", content: "Summarize the text into concise points for flashcards." },
         { role: "user", content: transcription },
       ],
     });
 
-    const flashcards = summaryResponse.choices[0].message.content
-      .split("\n")
-      .filter((line) => line.trim());
-
-    console.log("Generated Flashcards:", flashcards);
-
-    // Step 6: Save flashcards to the database
+    const flashcards = summaryResponse.choices[0].message.content.split("\n").filter((line) => line.trim());
     video.flashcards = flashcards.map((content) => ({ content }));
+    video.status = "completed";
     await video.save();
 
-    // Clean up: Remove downloaded audio file
     fs.unlinkSync(audioPath);
-
-    console.log("Video details saved:", video);
-
-    res.json({
-      message: "Flashcards generated successfully",
-      video: {
-        videoId,
-        title,
-        description,
-        thumbnail,
-        flashcards,
-      },
-    });
   } catch (error) {
-    console.error("Error generating flashcards:", error);
-    res.status(500).json({ error: "Failed to generate flashcards." });
+    console.error("Error processing video:", error);
+    const video = await YouTubeVideo.findById(videoId);
+    if (video) {
+      video.status = "failed";
+      video.error = error.message;
+      await video.save();
+    }
   }
-});
+};
 
+module.exports = router;
+
+
+// Get all saved videos for the logged-in user
 // Get all saved videos for the logged-in user
 router.get("/saved-videos", ensureAuthenticated, async (req, res) => {
   try {
-    const videos = await YouTubeVideo.find({ userId: req.user._id });
+    const videos = await YouTubeVideo.find({ userId: req.user._id })
+      .sort({ createdAt: -1 }); // Sort by createdAt descending
     res.json(videos);
   } catch (error) {
     console.error("Error fetching saved videos:", error);
