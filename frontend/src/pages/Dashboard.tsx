@@ -2,8 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, Transition } from "@headlessui/react";
 import { ChevronDownIcon, LogOutIcon, FileTextIcon } from "lucide-react";
+import { toast } from "react-toastify";
 import axios from "axios";
 import YoutubeVideoCard from "../components/YoutubeVideoCard";
+import "react-toastify/dist/ReactToastify.css";
 
 interface User {
   name: string;
@@ -20,15 +22,13 @@ interface SavedVideo {
 const Dashboard = () => {
   const navigate = useNavigate();
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [savedVideos, setSavedVideos] = useState<SavedVideo[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
-  // Fetch user and videos on mount
   useEffect(() => {
     const fetchUserAndVideos = async () => {
       try {
@@ -36,20 +36,44 @@ const Dashboard = () => {
           withCredentials: true,
         });
         setUser(userResponse.data);
-
-        const videosResponse = await axios.get("http://localhost:3000/youtube/saved-videos", {
-          withCredentials: true,
-        });
-        setSavedVideos(videosResponse.data);
+        await fetchSavedVideos();
       } catch (error) {
         console.error("Error fetching user or videos:", error);
+        toast.error("Failed to fetch user or videos.");
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchUserAndVideos();
-  }, []);
+
+    return () => {
+      if (pollingInterval) clearInterval(pollingInterval);
+    };
+  }, [pollingInterval]);
+
+  const fetchSavedVideos = async () => {
+    try {
+      const videosResponse = await axios.get("http://localhost:3000/youtube/saved-videos", {
+        withCredentials: true,
+      });
+      setSavedVideos(videosResponse.data);
+    } catch (error) {
+      console.error("Error fetching saved videos:", error);
+      toast.error("Failed to fetch saved videos.");
+    }
+  };
+
+  const checkVideoExists = async (videoId: string) => {
+    try {
+      const response = await axios.get(`http://localhost:3000/youtube/${videoId}`, {
+        withCredentials: true,
+      });
+      return response.status === 200; // Video exists
+    } catch (error) {
+      return false; // Video does not exist yet
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -57,63 +81,60 @@ const Dashboard = () => {
       window.location.href = "/";
     } catch (error) {
       console.error("Error logging out:", error);
+      toast.error("Failed to log out. Please try again.");
     }
   };
 
   const handleGenerate = async () => {
     try {
-      setIsGenerating(true);
+      setIsGenerating(true); // Start spinner
       const videoId = youtubeUrl.split("v=")[1]?.split("&")[0];
-  
       if (!videoId) {
-        alert("Invalid YouTube URL");
+        toast.error("Invalid YouTube URL");
         setIsGenerating(false);
         return;
       }
-  
-      const { data } = await axios.post(
+
+      const response = await axios.post(
         "http://localhost:3000/youtube/generate",
         { videoId },
         { withCredentials: true }
       );
-  
-      setYoutubeUrl("");
-  
-      // Polling for status updates
+
+      toast.success(response.data.message); // Success message from backend
+      setYoutubeUrl(""); // Clear the input field
+
+      // Start polling to detect when the video is saved
       const interval = setInterval(async () => {
-        try {
-          const statusResponse = await axios.get(`http://localhost:3000/youtube/status/${videoId}`, {
-            withCredentials: true,
-          });
-          if (statusResponse.data.status === "completed") {
-            clearInterval(interval);
-            const videosResponse = await axios.get("http://localhost:3000/youtube/saved-videos", {
-              withCredentials: true,
-            });
-            setSavedVideos(videosResponse.data);
-            setIsGenerating(false);
-          } else if (statusResponse.data.status === "failed") {
-            clearInterval(interval);
-            alert("Failed to generate flashcards. Please try again.");
-            setIsGenerating(false);
-          }
-        } catch (error) {
-          console.error("Error checking status:", error);
-          clearInterval(interval);
-          setIsGenerating(false);
+        const videoExists = await checkVideoExists(videoId);
+        if (videoExists) {
+          clearInterval(interval); // Stop polling once video exists
+          setPollingInterval(null);
+          await fetchSavedVideos(); // Refresh the video list
+          setIsGenerating(false); // Stop spinner
+          toast.success("Flashcards and video details have been saved!"); // Success toast
         }
-      }, 5000);
-    } catch (error) {
+      }, 2000); // Poll every 2 seconds
+
+      setPollingInterval(interval); // Track polling interval
+    } catch (error: any) {
       console.error("Error generating video details:", error);
-      alert("Failed to generate video details. Please try again.");
-      setIsGenerating(false);
+
+      const errorMessage =
+        error.response?.data?.error || "Failed to generate video details. Please try again.";
+      toast.error(errorMessage);
+
+      if (errorMessage === "Flashcards for this video already exist.") {
+        setYoutubeUrl(""); // Clear the input field
+      }
+
+      setIsGenerating(false); // Stop spinner
     }
   };
-  
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Fixed Top Section */}
+      {/* Top Navigation Section */}
       <div className="w-full fixed top-0 bg-white shadow-sm z-10">
         <div className="flex justify-between items-center px-16 py-3">
           <h1 className="text-2xl font-bold text-gray-800">Jotta</h1>
@@ -135,8 +156,8 @@ const Dashboard = () => {
                     enterFrom="transform opacity-0 scale-95"
                     enterTo="transform opacity-100 scale-100"
                     leave="transition ease-in duration-75"
-                    leaveFrom="transform opacity-100 scale-100"
-                    leaveTo="transform opacity-0 scale-95"
+                    leaveFrom="opacity-100 scale-100"
+                    leaveTo="opacity-0 scale-95"
                   >
                     <Menu.Items className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                       <Menu.Item>
@@ -161,10 +182,7 @@ const Dashboard = () => {
             )}
           </div>
         </div>
-
         <div className="py-4 px-16 max-w-2xl w-full mx-auto">
-          {error && <div className="text-red-600 text-sm mb-4">{error}</div>}
-          {message && <div className="text-green-600 text-sm mb-4">{message}</div>}
           <p className="text-gray-700 mb-4 text-center">
             {savedVideos.length > 0
               ? "Enter a YouTube video link to generate more flashcards or view your previously generated videos below."
@@ -180,16 +198,25 @@ const Dashboard = () => {
             />
             <button
               onClick={handleGenerate}
-              className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className={`w-full sm:w-auto px-4 py-2 rounded-lg text-white ${
+                isGenerating ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+              }`}
               disabled={isGenerating}
             >
-              {isGenerating ? "Generating..." : "Generate"}
+              {isGenerating ? (
+                <div className="flex items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-white border-dotted rounded-full animate-spin mr-2"></div>
+                  Generating...
+                </div>
+              ) : (
+                "Generate"
+              )}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Content Below Fixed Section */}
+      {/* Video Cards Section */}
       <div className="px-6 py-64">
         {isLoading ? (
           <div className="flex justify-center items-center h-32">
