@@ -238,4 +238,50 @@ router.delete("/:videoId", ensureAuthenticated, async (req, res) => {
   }
 });
 
+// Route for full search
+router.get("/search", ensureAuthenticated, async (req, res) => {
+  const { query } = req.query; // Extract query parameter
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({ error: "Search query cannot be empty." });
+  }
+
+  try {
+    const videos = await YouTubeVideo.find({
+      title: { $regex: query, $options: "i" }, // Case-insensitive regex search
+      userId: req.user._id, // Ensure results are specific to the logged-in user
+    });
+
+    if (videos.length === 0) {
+      return res.status(404).json({ message: "No videos found." });
+    }
+
+    res.json(videos);
+  } catch (error) {
+    console.error("Error searching videos:", error);
+    res.status(500).json({ error: "Failed to search for videos." });
+  }
+});
+
+// Route for auto-suggestions while typing
+router.get("/search-suggestions", ensureAuthenticated, async (req, res) => {
+  const { query } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: "Query parameter is required" });
+  }
+
+  try {
+    const videos = await YouTubeVideo.find({
+      title: { $regex: query, $options: "i" },
+      userId: req.user._id,
+    }).limit(10); // Limit suggestions to 10 items
+    res.json(videos);
+  } catch (error) {
+    console.error("Error fetching search suggestions:", error);
+    res.status(500).json({ error: "Failed to fetch search suggestions." });
+  }
+});
+
+
 module.exports = router;
