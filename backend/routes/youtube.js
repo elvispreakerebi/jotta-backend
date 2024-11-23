@@ -23,21 +23,24 @@ const queueEvents = new QueueEvents("flashcardsQueue", { connection });
 
 // Listen for job completion and failure
 queueEvents.on("completed", (jobId, result) => {
-  console.log(`Job ${jobId} completed with result: ${result}`);
+  console.log(`[QUEUE] Job ${jobId} completed with result: ${result}`);
 });
 queueEvents.on("failed", (jobId, failedReason) => {
-  console.error(`Job ${jobId} failed with reason: ${failedReason}`);
+  console.error(`[QUEUE] Job ${jobId} failed with reason: ${failedReason}`);
 });
 
 // Helper function to fetch YouTube video details
 const fetchVideoDetails = async (videoId) => {
   const apiUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
 
+  console.log(`[FETCH] Fetching video details for video ID: ${videoId}`);
   try {
     const response = await axios.get(apiUrl);
     const { title, thumbnail_url: thumbnail } = response.data;
+    console.log(`[FETCH] Fetched details: Title="${title}", Thumbnail="${thumbnail}"`);
     return { title, thumbnail };
   } catch (error) {
+    console.error(`[FETCH] Failed to fetch video details: ${error.message}`);
     throw new Error("Failed to fetch video details.");
   }
 };
@@ -45,6 +48,8 @@ const fetchVideoDetails = async (videoId) => {
 // Helper function to download audio
 const downloadAudio = async (videoId) => {
   const audioPath = path.resolve(__dirname, `../temp/${videoId}.mp3`);
+  console.log(`[DOWNLOAD] Downloading audio for video ID: ${videoId}`);
+
   await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
     extractAudio: true,
     audioFormat: "mp3",
@@ -53,18 +58,20 @@ const downloadAudio = async (videoId) => {
   });
 
   if (!fs.existsSync(audioPath)) {
+    console.error(`[DOWNLOAD] Audio file not found at path: ${audioPath}`);
     throw new Error(`Audio file not found at path: ${audioPath}`);
   }
 
+  console.log(`[DOWNLOAD] Audio downloaded successfully: ${audioPath}`);
   return audioPath;
 };
 
 // Helper function to transcribe and summarize audio
 const transcribeAndSummarize = async (audioPath) => {
+  console.log(`[TRANSCRIBE] Uploading audio for transcription: ${audioPath}`);
   const uploadUrl = "https://api.assemblyai.com/v2/upload";
   const audioStream = fs.createReadStream(audioPath);
 
-  // Upload the audio file
   const uploadResponse = await axios.post(uploadUrl, audioStream, {
     headers: {
       authorization: ASSEMBLYAI_API_KEY,
@@ -73,86 +80,97 @@ const transcribeAndSummarize = async (audioPath) => {
   });
 
   const { upload_url: audioUrl } = uploadResponse.data;
+  console.log(`[TRANSCRIBE] Audio uploaded successfully: ${audioUrl}`);
 
-  // Start transcription with summarization
+  console.log("[TRANSCRIBE] Starting transcription and summarization...");
   const transcriptResponse = await axios.post(
-    "https://api.assemblyai.com/v2/transcript",
-    {
-      audio_url: audioUrl,
-      summarization: true,
-      summary_type: "bullets",
-      summary_model: "informative",
-    },
-    {
-      headers: {
-        authorization: ASSEMBLYAI_API_KEY,
+      "https://api.assemblyai.com/v2/transcript",
+      {
+        audio_url: audioUrl,
+        summarization: true,
+        summary_type: "bullets",
+        summary_model: "informative",
       },
-    }
-  );
-
-  const { id: transcriptId } = transcriptResponse.data;
-
-  // Poll for transcription completion
-  while (true) {
-    const statusResponse = await axios.get(
-      `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
       {
         headers: {
           authorization: ASSEMBLYAI_API_KEY,
         },
       }
+  );
+
+  const { id: transcriptId } = transcriptResponse.data;
+  console.log(`[TRANSCRIBE] Transcription started with ID: ${transcriptId}`);
+
+  while (true) {
+    const statusResponse = await axios.get(
+        `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
+        {
+          headers: {
+            authorization: ASSEMBLYAI_API_KEY,
+          },
+        }
     );
 
     if (statusResponse.data.status === "completed") {
+      console.log("[TRANSCRIBE] Transcription completed successfully.");
       const { summary } = statusResponse.data;
       const flashcards = Array.isArray(summary)
-        ? summary.map((item) => ({ content: item }))
-        : summary.split("\n").map((line) => ({ content: line.trim() }));
+          ? summary.map((item) => ({ content: item }))
+          : summary.split("\n").map((line) => ({ content: line.trim() }));
+      console.log(`[TRANSCRIBE] Flashcards generated: ${flashcards.length}`);
       return { flashcards };
     }
 
     if (statusResponse.data.status === "failed") {
+      console.error("[TRANSCRIBE] Transcription failed.");
       throw new Error("AssemblyAI transcription failed.");
     }
 
+    console.log("[TRANSCRIBE] Transcription in progress...");
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 };
 
 // Worker for processing flashcards generation
 new Worker(
-  "flashcardsQueue",
-  async (job) => {
-    const { videoId, userId } = job.data;
+    "flashcardsQueue",
+    async (job) => {
+      const { videoId, userId } = job.data;
 
-    try {
-      // Fetch video details
-      const { title, thumbnail } = await fetchVideoDetails(videoId);
+      try {
+        console.log(`[WORKER] Processing job for video ID: ${videoId}, User ID: ${userId}`);
 
-      // Download audio
-      const audioPath = await downloadAudio(videoId);
+        // Fetch video details
+        const { title, thumbnail } = await fetchVideoDetails(videoId);
 
-      // Transcribe and summarize the audio
-      const { flashcards } = await transcribeAndSummarize(audioPath);
+        // Download audio
+        const audioPath = await downloadAudio(videoId);
 
-      // Save to database
-      const video = new YouTubeVideo({
-        videoId,
-        userId,
-        title,
-        thumbnail,
-        flashcards,
-      });
+        // Transcribe and summarize the audio
+        const { flashcards } = await transcribeAndSummarize(audioPath);
 
-      await video.save();
+        // Save to database
+        console.log(`[DATABASE] Saving flashcards and video details to the database.`);
+        const video = new YouTubeVideo({
+          videoId,
+          userId,
+          title,
+          thumbnail,
+          flashcards,
+        });
 
-      // Clean up
-      fs.unlinkSync(audioPath);
-    } catch (error) {
-      throw error;
-    }
-  },
-  { connection }
+        await video.save();
+        console.log(`[DATABASE] Video saved successfully: ${title}`);
+
+        // Clean up
+        fs.unlinkSync(audioPath);
+        console.log(`[CLEANUP] Audio file deleted: ${audioPath}`);
+      } catch (error) {
+        console.error(`[WORKER] Error processing job: ${error.message}`);
+        throw error;
+      }
+    },
+    { connection }
 );
 
 // Route to generate flashcards
@@ -160,16 +178,19 @@ router.post("/generate", ensureAuthenticated, async (req, res) => {
   const { videoId } = req.body;
 
   if (!videoId) {
+    console.log("[REQUEST] Missing video ID in request.");
     return res.status(400).json({ error: "Video ID is required" });
   }
 
   try {
+    console.log(`[REQUEST] Received request to generate flashcards for video ID: ${videoId}`);
     const existingVideo = await YouTubeVideo.findOne({
       videoId,
       userId: req.user._id,
     });
 
     if (existingVideo) {
+      console.log("[REQUEST] Flashcards already exist for this video.");
       return res.status(400).json({
         error: "Flashcards for this video already exist for this user.",
       });
@@ -180,11 +201,13 @@ router.post("/generate", ensureAuthenticated, async (req, res) => {
       userId: req.user._id,
     });
 
+    console.log(`[QUEUE] Job added to queue with ID: ${job.id}`);
     res.json({
       message: "Flashcards generation process has started.",
       jobId: job.id,
     });
   } catch (error) {
+    console.error(`[REQUEST] Error processing generate request: ${error.message}`);
     res.status(500).json({ error: "Failed to process the video." });
   }
 });
