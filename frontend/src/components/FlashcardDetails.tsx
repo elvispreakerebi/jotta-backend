@@ -43,7 +43,7 @@ const FlashcardDetails: React.FC = () => {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      await axios.delete(`http://localhost:3000/youtube/delete/${videoId}`, {
+      await axios.delete(`http://localhost:3000/youtube/${videoId}`, {
         withCredentials: true,
       });
       navigate("/dashboard");
