@@ -163,12 +163,12 @@ const FlashcardDetails: React.FC = () => {
               {/* Flashcard Navigation and Content */}
               <div className="bg-white rounded-lg shadow-lg relative max-w-md w-full p-6 text-center">
                 {/* Current Flashcard Number */}
-                <p className="text-gray-600 mb-2">
+                <p className="text-gray-600 mb-2 text-left">
                   Flashcard {currentFlashcard + 1} of {video.flashcards.length}
                 </p>
 
                 {/* Flashcard Content */}
-                <p className="py-12 text-lg">{video.flashcards[currentFlashcard]?.content}</p>
+                <p className="py-12 text-lg text-left">{video.flashcards[currentFlashcard]?.content}</p>
 
                 {/* Close Button */}
                 <button

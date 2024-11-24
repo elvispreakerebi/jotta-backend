@@ -33,13 +33,20 @@ const Dashboard = () => {
     const fetchUserAndVideos = async () => {
       try {
         const userResponse = await axios.get("http://localhost:3000/auth/user", {
-          withCredentials: true,
+          withCredentials: true, // Ensure credentials are included
         });
         setUser(userResponse.data);
+
         await fetchSavedVideos();
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error fetching user or videos:", error);
-        toast.error("Failed to fetch user or videos.");
+
+        if (error.response?.status === 401) {
+          toast.error("Session expired. Please log in again.");
+          navigate("/"); // Redirect to login page
+        } else {
+          toast.error("Failed to fetch user or videos.");
+        }
       } finally {
         setIsLoading(false);
       }

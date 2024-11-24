@@ -1,5 +1,5 @@
 const express = require("express");
-const { Queue, Worker, QueueEvents, Job } = require("bullmq");
+const { Queue, Worker, QueueEvents } = require("bullmq");
 const axios = require("axios");
 const YouTubeVideo = require("../models/YoutubeVideo");
 const ensureAuthenticated = require("../middleware/ensureAuthenticated");
@@ -143,13 +143,19 @@ const summarizeTranscription = async (transcription) => {
               Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
               "Content-Type": "application/json",
             },
+            timeout: 30000, // 30 seconds timeout
           }
       );
+
+      if (response.data.error) {
+        console.error("Hugging Face API Error:", response.data.error);
+        throw new Error(response.data.error);
+      }
 
       const summary = response.data[0].summary_text.trim();
       summarizedChunks.push(summary);
     } catch (error) {
-      console.error("Error summarizing chunk:", error.response?.data || error.message);
+      console.error("Detailed API error response:", error.response?.data || error.message);
       throw new Error("Failed to summarize transcription using Hugging Face.");
     }
   }
@@ -214,10 +220,14 @@ new Worker(
         // Retry job if it's a transient error
         if (error.message.includes("Failed to summarize transcription") || error.message.includes("AssemblyAI transcription failed")) {
           console.log("Retrying job...");
+          if (job.attemptsMade >= 5) {
+            console.error("Max retries reached. Job will not be retried further.");
+            return; // Prevent further retries
+          }
           throw error; // BullMQ will handle retrying the job
         }
 
-        throw error; // For other errors, let it fail
+        throw error; // For other errors, let the job fail without retrying
       }
     },
     { connection, attempts: 5, backoff: { type: "fixed", delay: 5000 } } // Retry logic
@@ -239,7 +249,7 @@ router.post("/generate", ensureAuthenticated, async (req, res) => {
 
     if (existingVideo) {
       return res.status(400).json({
-        error: "Flashcards for this video already exist.",
+        error: "Flashcards for this video already exist for this user.",
       });
     }
 
@@ -256,6 +266,7 @@ router.post("/generate", ensureAuthenticated, async (req, res) => {
     res.status(500).json({ error: "Failed to process the video." });
   }
 });
+
 
 // Route to get saved videos
 router.get("/saved-videos", ensureAuthenticated, async (req, res) => {
