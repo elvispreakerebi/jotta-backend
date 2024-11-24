@@ -14,9 +14,14 @@ const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
 
 // Redis connection options
+// const connection = {
+//   host: "localhost",
+//   port: 6379,
+// };
+const Redis = require("ioredis");
+const redis = new Redis(process.env.REDIS_URL);
 const connection = {
-  host: "localhost",
-  port: 6379,
+  redis,
 };
 
 // Create the queue and events tracker
