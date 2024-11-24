@@ -139,7 +139,7 @@ const FlashcardDetails: React.FC = () => {
         )}
 
         {/* Flashcards Section */}
-        <div className="mt-16 px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="mt-16 px-6 py-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {video?.flashcards.length ? (
               video.flashcards.map((flashcard, index) => (
                   <div
@@ -179,7 +179,7 @@ const FlashcardDetails: React.FC = () => {
                 </button>
 
                 {/* Navigation Arrows */}
-                <div className="hidden sm:flex justify-between items-center mt-4">
+                <div className="flex justify-between items-center mt-4">
                   <div
                       className="flex items-center justify-center w-10 h-10 bg-gray-200 rounded-full cursor-pointer"
                       onClick={handlePreviousFlashcard}
