@@ -239,7 +239,7 @@ router.post("/generate", ensureAuthenticated, async (req, res) => {
 
     if (existingVideo) {
       return res.status(400).json({
-        error: "Flashcards for this video already exist for this user.",
+        error: "Flashcards for this video already exist.",
       });
     }
 

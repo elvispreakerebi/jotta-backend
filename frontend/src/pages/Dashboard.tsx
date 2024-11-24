@@ -112,7 +112,7 @@ const Dashboard = () => {
           setPollingInterval(null);
           await fetchSavedVideos(); // Refresh the video list
           setIsGenerating(false); // Stop spinner
-          toast.success("Flashcards and video details have been saved!"); // Success toast
+          toast.success("Flashcards have been saved!"); // Success toast
         }
       }, 2000); // Poll every 2 seconds
 
@@ -124,7 +124,7 @@ const Dashboard = () => {
           error.response?.data?.error || "Failed to generate video details. Please try again.";
       toast.error(errorMessage);
 
-      if (errorMessage === "Flashcards for this video already exist.") {
+      if (errorMessage.includes("already exist")) {
         setYoutubeUrl(""); // Clear the input field
       }
 
