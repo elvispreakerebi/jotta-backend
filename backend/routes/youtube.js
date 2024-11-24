@@ -13,7 +13,7 @@ const router = express.Router();
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
 
-// Redis connection options
+// // Redis connection options
 // const connection = {
 //   host: "localhost",
 //   port: 6379,
