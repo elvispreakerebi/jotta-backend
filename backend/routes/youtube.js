@@ -1,5 +1,5 @@
 const express = require("express");
-const { Queue, Worker, QueueEvents } = require("bullmq");
+const { Queue, Worker, QueueEvents, Job } = require("bullmq");
 const axios = require("axios");
 const YouTubeVideo = require("../models/YoutubeVideo");
 const ensureAuthenticated = require("../middleware/ensureAuthenticated");
@@ -134,7 +134,7 @@ const summarizeTranscription = async (transcription) => {
   const summarizedChunks = [];
   for (const chunk of transcriptionChunks) {
     try {
-      const prompt = `Summarize the following text into concise points suitable for flashcards:\n\n${chunk}\n\nSummary:`;
+      const prompt = `Summarize the following text into concise and important points suitable for flashcards:\n\n${chunk}\n\nSummary:`;
       const response = await axios.post(
           "https://api-inference.huggingface.co/models/facebook/bart-large-cnn", // Hugging Face Summarization Model
           { inputs: prompt },
@@ -172,43 +172,55 @@ new Worker(
         // Download audio
         const audioPath = await downloadAudio(videoId);
 
-        // Transcribe audio
-        const transcription = await transcribeAudio(audioPath);
+        try {
+          // Transcribe audio
+          const transcription = await transcribeAudio(audioPath);
+          console.log("Full transcription obtained.");
 
-        console.log("Full transcription obtained.");
+          // Summarize the transcription
+          const summarizedTranscription = await summarizeTranscription(transcription);
+          console.log("Summarized transcription:", summarizedTranscription);
 
-        // Summarize the transcription
-        const summarizedTranscription = await summarizeTranscription(transcription);
-        console.log("Summarized transcription:", summarizedTranscription);
+          // Generate flashcards
+          const flashcards = summarizedTranscription
+              .split("\n")
+              .filter((line) => line.trim())
+              .map((content) => ({ content }));
 
-        // Generate flashcards
-        const flashcards = summarizedTranscription
-            .split("\n")
-            .filter((line) => line.trim())
-            .map((content) => ({ content }));
+          console.log("Generated flashcards:", flashcards);
 
-        console.log("Generated flashcards:", flashcards);
+          // Save to database
+          const video = new YouTubeVideo({
+            videoId,
+            userId,
+            title,
+            thumbnail,
+            flashcards,
+          });
 
-        // Save to database
-        const video = new YouTubeVideo({
-          videoId,
-          userId,
-          title,
-          thumbnail,
-          flashcards,
-        });
+          await video.save();
 
-        await video.save();
-
-        // Clean up
-        fs.unlinkSync(audioPath);
-        console.log("Job completed successfully.");
+          console.log("Job completed successfully.");
+        } finally {
+          // Clean up audio file after processing
+          if (fs.existsSync(audioPath)) {
+            fs.unlinkSync(audioPath);
+            console.log(`Audio file ${audioPath} removed.`);
+          }
+        }
       } catch (error) {
         console.error("Error processing job:", error);
-        throw error;
+
+        // Retry job if it's a transient error
+        if (error.message.includes("Failed to summarize transcription") || error.message.includes("AssemblyAI transcription failed")) {
+          console.log("Retrying job...");
+          throw error; // BullMQ will handle retrying the job
+        }
+
+        throw error; // For other errors, let it fail
       }
     },
-    { connection }
+    { connection, attempts: 5, backoff: { type: "fixed", delay: 5000 } } // Retry logic
 );
 
 // Route to generate flashcards
